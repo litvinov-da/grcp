@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+/CMakePresets.json
+/out/build
+/.vs
+/CMakeUserPresets.json
+/thirdparty/spdlog
