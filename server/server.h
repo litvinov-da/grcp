@@ -2,12 +2,13 @@
 
 #include <spdlog/spdlog.h>
 
+#include <QHostInfo>
 #include <QObject>
 
 class QUdpSocket;
 
 namespace Server {
-class Server : public QObject {
+class Server final : public QObject {
   Q_OBJECT
 
  public:
@@ -19,9 +20,16 @@ class Server : public QObject {
   bool start();
 
  private:
+  void sendBroadcastDatagram();
+
+ private:
   QUdpSocket* broadcastSocket{nullptr};
 
   std::shared_ptr<spdlog::logger> logger{nullptr};
-  std::optional<quint16> port {std::nullopt};
+  std::optional<quint16> port{std::nullopt};
+
+  QHostAddress ip;
+
+  QTimer* broadcastTimer{nullptr};
 };
 }  // namespace Server
