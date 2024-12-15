@@ -10,8 +10,10 @@ ServerWidget::ServerWidget(QWidget* parent)
     : QWidget(parent), ui(new Ui::ServerWidget()) {
   ui->setupUi(this);
 
-  server = new Server(spdlog::qt_logger_mt(
-                          "textedit_logger", ui->logEdit),
+  auto logger = spdlog::qt_logger_mt(
+      "textedit_logger", ui->logEdit);
+  logger->set_level(spdlog::level::trace);
+  server = new Server(logger,
                       this);
 
   connect(ui->startButton, &QPushButton::clicked, this,

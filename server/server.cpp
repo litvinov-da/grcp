@@ -3,7 +3,7 @@
 
 #include <QHostInfo>
 #include <QNetworkInterface>
-#include "broadcastmessage.h"
+#include "broadcastsender.h"
 #include "pingservice.h"
 
 #include <grpcpp/grpcpp.h>
@@ -11,8 +11,6 @@
 namespace Server {
 
 namespace {
-constexpr const int broadcastPort = 10001;
-constexpr const int broadcastTimeout = 1000;
 
 QHostAddress getHostIp() {
   const auto localhost = QHostAddress(QHostAddress::LocalHost);
@@ -22,22 +20,27 @@ QHostAddress getHostIp() {
       return address;
     }
   }
+
+  return {};
 }
 }  // namespace
 
 Server::Server(const std::shared_ptr<spdlog::logger>& logger, QObject* parent)
     : QObject{parent},
       logger(logger),
-      broadcastSocket(new QUdpSocket(this)),
       ip(getHostIp()),
-      broadcastTimer(new QTimer(this)) {
-  broadcastTimer->setInterval(broadcastTimeout);
-  connect(broadcastTimer, &QTimer::timeout, this,
-          &Server::sendBroadcastDatagram);
+      broadcastSender(new BroadcastUtil::BroadcastSender(this)) {
+  broadcastSender->setIp(ip);
+
+  connect(broadcastSender, &BroadcastUtil::BroadcastSender::hasError, this,
+          &Server::logBroadcastSenderError);
+  connect(broadcastSender, &BroadcastUtil::BroadcastSender::sent, this,
+          &Server::logBroadcastSent);
 }
 
 void Server::setPort(quint16 port) {
   this->port = port;
+  broadcastSender->setPort(port);
 }
 
 bool Server::start() {
@@ -45,24 +48,11 @@ bool Server::start() {
 
   logger->info("Starting server...");
 
-  if (!port) {
-    logger->error("No port initialized. No broadcasting started");
-    logger->info("Init port before starting server");
-
-    return false;
-  }
-
-  if (ip.isNull()) {
-    logger->error("Something went wrong when initializing ip address");
-    return false;
-  }
-
   auto* pingService = new PingService(logger, this);
-  connect(pingService, &PingService::hasPing, broadcastTimer, &QTimer::stop,
-          Qt::QueuedConnection);
-  connect(
-      pingService, &PingService::pingTimeout, this,
-      [this]() { broadcastTimer->start(); }, Qt::QueuedConnection);
+  connect(pingService, &PingService::hasPing, broadcastSender,
+          &BroadcastUtil::BroadcastSender::stop, Qt::QueuedConnection);
+  connect(pingService, &PingService::pingTimeout, broadcastSender,
+          &BroadcastUtil::BroadcastSender::start, Qt::QueuedConnection);
 
   std::thread grpcServerThread{[pingService, this]() {
     grpc::ServerBuilder builder;
@@ -71,25 +61,42 @@ bool Server::start() {
     assert(port);
 
     builder.AddListeningPort(
-        ip.toString().toStdString() + std::to_string(port.value()),
+        ip.toString().toStdString() + ":" + std::to_string(port.value()),
         grpc::InsecureServerCredentials());
     builder.RegisterService(pingService);
 
     auto server{builder.BuildAndStart()};
     server->Wait();
   }};
+  grpcServerThread.detach();
 
-  broadcastTimer->start();
+  broadcastSender->start();
 
   return true;
 }
-void Server::sendBroadcastDatagram() {
-  assert(!ip.isNull());
-  assert(port);
 
-  logger->trace("Send broadcast");
-  broadcastSocket->writeDatagram(
-      BroadcastMessage{ip, port.value()}.getBinaryMessage(),
-      QHostAddress::Broadcast, broadcastPort);
+void Server::logBroadcastSenderError(BroadcastUtil::Error error) {
+  switch (error.type) {
+    case BroadcastUtil::Error::Type::NoPort: {
+      logger->error("No port error occured. Description: {}",
+                    error.description);
+    } break;
+    case BroadcastUtil::Error::Type::NoIpAddress: {
+      logger->error("No ip address error occured. Description: {}",
+                    error.description);
+    } break;
+    case BroadcastUtil::Error::Type::Unknown: {
+      logger->error("Unknown error occured; Description: {}",
+                    error.description);
+    } break;
+    default: {
+      assert(false && "Not all error type handled");
+    }
+  }
 }
+
+void Server::logBroadcastSent() {
+  logger->trace("Broadcast message sent");
+}
+
 }  // namespace Server

@@ -5,8 +5,13 @@
 #include <QHostInfo>
 #include <QObject>
 
+#include <error.h>
+
 class QUdpSocket;
 
+namespace BroadcastUtil {
+class BroadcastSender;
+}
 namespace Server {
 class Server final : public QObject {
   Q_OBJECT
@@ -20,16 +25,15 @@ class Server final : public QObject {
   bool start();
 
  private:
-  void sendBroadcastDatagram();
+  void logBroadcastSenderError(BroadcastUtil::Error error);
+  void logBroadcastSent();
 
  private:
-  QUdpSocket* broadcastSocket{nullptr};
-
   std::shared_ptr<spdlog::logger> logger{nullptr};
-  std::optional<quint16> port{std::nullopt};
 
+  std::optional<quint16> port {std::nullopt};
   QHostAddress ip;
 
-  QTimer* broadcastTimer{nullptr};
+  BroadcastUtil::BroadcastSender* broadcastSender {nullptr};
 };
 }  // namespace Server
