@@ -2,7 +2,9 @@ project(server)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Network Widgets)
 
-set(TARGET_SOURCES "main.cpp" "server.h" "server.cpp"  "serverwidget.h" "serverwidget.cpp" "serverwidget.ui" "pingservice.h" "pingservice.cpp")
+set(TARGET_SOURCES "main.cpp" "server.h" "server.cpp"
+    "serverwidget.h" "serverwidget.cpp" "serverwidget.ui" "pingservice.h" "pingservice.cpp"
+    "pingserver.h" "pingserver.cpp")
 
 add_executable(${PROJECT_NAME} ${TARGET_SOURCES})
 

@@ -20,6 +20,9 @@ class PingService final : public QObject, public MaintainingApi::Service {
   void hasPing();
   void pingTimeout();
 
+  void startTimerPrivate();
+  void hasPingPrivate();
+
  private:
   QTimer* timeoutTimer{nullptr};
   std::shared_ptr<spdlog::logger> logger{nullptr};

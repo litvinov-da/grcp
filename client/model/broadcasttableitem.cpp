@@ -16,6 +16,6 @@ QString broadcastStatusToString(BroadcastTableItem::Status status) {
 }
 
 BroadcastTableItem::BroadcastTableItem(const QHostAddress& ip, quint16 port)
-    : ipInfo(IpInfo{ip, port}), lastPingTime{}, status(Status::Offline) {}
+    : ipInfo(ip, port), lastPingTime{}, status(Status::Offline) {}
 
 }  // namespace Client

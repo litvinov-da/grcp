@@ -7,18 +7,19 @@
 
 #include <error.h>
 
-class QUdpSocket;
-
 namespace BroadcastUtil {
 class BroadcastSender;
 }
 namespace Server {
+class PingServer;
+
 class Server final : public QObject {
   Q_OBJECT
 
  public:
   Server(const std::shared_ptr<spdlog::logger>& logger,
          QObject* parent = nullptr);
+  ~Server() override;
 
   void setPort(quint16 port);
 
@@ -30,10 +31,10 @@ class Server final : public QObject {
 
  private:
   std::shared_ptr<spdlog::logger> logger{nullptr};
-
-  std::optional<quint16> port {std::nullopt};
+  BroadcastUtil::BroadcastSender* broadcastSender{nullptr};
   QHostAddress ip;
+  std::optional<quint16> port {std::nullopt};
 
-  BroadcastUtil::BroadcastSender* broadcastSender {nullptr};
+  QThread* serverThread{nullptr};
 };
 }  // namespace Server

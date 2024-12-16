@@ -1,23 +1,23 @@
 #include "broadcasttablemodel.h"
 
 #include <broadcastlistener.h>
+#include <QColor>
 
 namespace Client {
 
 namespace {
-BroadcastTableModel::AvailableAction toAvailableAction(
-    BroadcastTableItem::Status status) {
+AvailableAction toAvailableAction(BroadcastTableItem::Status status) {
   switch (status) {
     case BroadcastTableItem::Status::Offline:
-      return BroadcastTableModel::AvailableAction::Connect;
+      return AvailableAction::Connect;
     case BroadcastTableItem::Status::Online:
-      return BroadcastTableModel::AvailableAction::Disconnect;
+      return AvailableAction::Disconnect;
   }
 
   assert(false);
 
   // return something, does not really matter what exactly
-  return BroadcastTableModel::AvailableAction::Connect;
+  return AvailableAction::Connect;
 }
 }  // namespace
 
@@ -36,8 +36,9 @@ QString BroadcastTableModel::availableActionToString(AvailableAction action) {
 BroadcastTableModel::BroadcastTableModel(QObject* parent)
     : QAbstractTableModel{parent},
       broadcastListener(new BroadcastUtil::BroadcastListener(this)) {
-  connect(broadcastListener, &BroadcastUtil::BroadcastListener::newBroadcastServerDetected,
-          this, &BroadcastTableModel::addItem);
+  connect(broadcastListener,
+          &BroadcastUtil::BroadcastListener::newBroadcastServerDetected, this,
+          &BroadcastTableModel::addItem);
 }
 
 }  // namespace Client
@@ -46,7 +47,8 @@ int Client::BroadcastTableModel::rowCount(const QModelIndex& /*parent*/) const {
   return items.size();
 }
 
-int Client::BroadcastTableModel::columnCount(const QModelIndex& /*parent*/) const {
+int Client::BroadcastTableModel::columnCount(
+    const QModelIndex& /*parent*/) const {
   return SizeInternal_Column;
 }
 
@@ -66,12 +68,11 @@ QVariant Client::BroadcastTableModel::data(const QModelIndex& index,
     return getTextAlignmentRole(index);
   }
 
-  return {};
-}
+  if (role == Qt::ForegroundRole) {
+    return getForegroundRole(index);
+  }
 
-bool Client::BroadcastTableModel::setData(const QModelIndex& index,
-                                          const QVariant& value, int role) {
-  return false;
+  return {};
 }
 
 QVariant Client::BroadcastTableModel::headerData(int section,
@@ -95,9 +96,74 @@ QVariant Client::BroadcastTableModel::headerData(int section,
   }
 }
 
-bool Client::BroadcastTableModel::insertRows(int row, int count,
-                                             const QModelIndex& parent) {
-  return false;
+void Client::BroadcastTableModel::triggerAction(const QModelIndex& index) {
+  assert(index.isValid());
+  assert(index.column() == AvailableAction_Column);
+
+  auto& item = items[index.row()];
+  const auto action = toAvailableAction(item.status);
+  if (pingSenders.contains(item.ipInfo)) {
+    switch (action) {
+      case AvailableAction::Connect: {
+        pingSenders[item.ipInfo]->start();
+      } break;
+      case AvailableAction::Disconnect: {
+        pingSenders[item.ipInfo]->stop();
+        item.status = BroadcastTableItem::Status::Offline;
+        emit dataChanged(this->index(index.row(), 0),
+                         this->index(index.row(), columnCount()));
+      } break;
+    }
+  } else {
+    assert(action == AvailableAction::Connect);
+
+    auto pingSender = std::make_shared<PingSender>(item.ipInfo);
+    connect(pingSender.get(), &PingSender::hasPing, this,
+            &BroadcastTableModel::updateHasPing);
+    connect(pingSender.get(), &PingSender::disconnect, this,
+            &BroadcastTableModel::updateDisconnect);
+
+    pingSenders.insert({item.ipInfo, pingSender});
+    pingSender->start();
+  }
+}
+
+void Client::BroadcastTableModel::updateHasPing(
+    const NetworkUtil::NetworkNodeInfo& serverInfo) {
+  auto item =
+      std::find_if(items.begin(), items.end(),
+                   [serverInfo](const BroadcastTableItem& item) -> bool {
+                     return item.ipInfo == serverInfo;
+                   });
+
+  assert(item != items.end());
+
+  item->lastPingTime = QDateTime::currentDateTime();
+  item->status = BroadcastTableItem::Status::Online;
+
+  const auto row = std::distance(items.begin(), item);
+  emit dataChanged(index(row, 0), index(row, columnCount()));
+}
+
+void Client::BroadcastTableModel::updateDisconnect(
+    const NetworkUtil::NetworkNodeInfo& serverInfo) {
+  auto item =
+      std::find_if(items.begin(), items.end(),
+                   [serverInfo](const BroadcastTableItem& item) -> bool {
+                     return item.ipInfo == serverInfo;
+                   });
+
+  assert(item != items.end());
+
+  item->status = BroadcastTableItem::Status::Offline;
+
+  auto pingSender = pingSenders.find(serverInfo);
+  assert(pingSender != pingSenders.end());
+
+  pingSender->second->stop();
+
+  const auto row = std::distance(items.begin(), item);
+  emit dataChanged(index(row, 0), index(row, columnCount()));
 }
 
 QString Client::BroadcastTableModel::getHeaderDataDisplayRole(
@@ -159,7 +225,7 @@ QString Client::BroadcastTableModel::getDisplayRole(
   switch (column) {
     case Ip_Column: {
       static constinit const QStringView ipDisplayRoleTemplate{u"%1:%2"};
-      return ipDisplayRoleTemplate.arg(item.ipInfo.ipAdress.toString(),
+      return ipDisplayRoleTemplate.arg(item.ipInfo.ip.toString(),
                                        QString::number(item.ipInfo.port));
     }
     case LastPingTime_Column: {
@@ -191,6 +257,28 @@ QString Client::BroadcastTableModel::getDisplayRole(
 QVariant Client::BroadcastTableModel::getTextAlignmentRole(
     const QModelIndex& index) const {
   return Qt::AlignCenter;
+}
+
+QVariant Client::BroadcastTableModel::getForegroundRole(
+    const QModelIndex& index) const {
+  assert(index.isValid());
+  assert(index.column() < SizeInternal_Column);
+  assert(index.row() < items.size());
+
+  if (index.column() != Status_Column) {
+    return {};
+  }
+
+  const auto& item = items[index.row()];
+  switch (item.status) {
+    case BroadcastTableItem::Status::Offline:
+      return QColor(Qt::red);
+    case BroadcastTableItem::Status::Online:
+      return QColor(Qt::green);
+  }
+
+  assert(false && "Not all handled");
+  return {};
 }
 
 void Client::BroadcastTableModel::addItem(const QHostAddress& serverIp,

@@ -3,12 +3,16 @@
 #include <qtypes.h>
 #include <QHostAddress>
 
+#include <networknodeinfo.h>
+
 class QNetworkDatagram;
 
 namespace BroadcastUtil {
 namespace Private {
 
 class BroadcastMessage final {
+  friend class std::hash<BroadcastMessage>;
+
  public:
   static BroadcastMessage create(const QByteArray& data);
 
@@ -28,11 +32,16 @@ class BroadcastMessage final {
   quint16& getServerPort();
 
  private:
-  quint16 serverPort;
-  QHostAddress serverIp;
+  NetworkUtil::NetworkNodeInfo serverInfo;
 };
-
-size_t qHash(const BroadcastMessage& key, size_t seed = 0) noexcept;
 
 }  // namespace Private
 }  // namespace BroadcastUtil
+
+namespace std {
+template <>
+struct hash<BroadcastUtil::Private::BroadcastMessage> {
+  std::uint64_t operator()(
+      const BroadcastUtil::Private::BroadcastMessage& message) const;
+};
+}

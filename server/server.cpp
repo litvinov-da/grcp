@@ -2,11 +2,12 @@
 #include <QUdpSocket>
 
 #include <QHostInfo>
-#include <QNetworkInterface>
-#include "broadcastsender.h"
-#include "pingservice.h"
 
-#include <grpcpp/grpcpp.h>
+#include "broadcastsender.h"
+#include "pingserver.h"
+
+#include <QNetworkInterface>
+#include <QThreadPool>
 
 namespace Server {
 
@@ -28,14 +29,17 @@ QHostAddress getHostIp() {
 Server::Server(const std::shared_ptr<spdlog::logger>& logger, QObject* parent)
     : QObject{parent},
       logger(logger),
-      ip(getHostIp()),
-      broadcastSender(new BroadcastUtil::BroadcastSender(this)) {
-  broadcastSender->setIp(ip);
-
+      broadcastSender(new BroadcastUtil::BroadcastSender(this)),
+      ip(getHostIp()), serverThread(new QThread(nullptr)) {
   connect(broadcastSender, &BroadcastUtil::BroadcastSender::hasError, this,
           &Server::logBroadcastSenderError);
   connect(broadcastSender, &BroadcastUtil::BroadcastSender::sent, this,
           &Server::logBroadcastSent);
+}
+
+Server::~Server() {
+  serverThread->quit();
+  serverThread->wait();
 }
 
 void Server::setPort(quint16 port) {
@@ -48,29 +52,35 @@ bool Server::start() {
 
   logger->info("Starting server...");
 
-  auto* pingService = new PingService(logger, this);
-  connect(pingService, &PingService::hasPing, broadcastSender,
+  if (!port) {
+    logger->error("No port set up. Impossible to start server");
+    return false;
+  }
+
+  if (ip.isNull()) {
+    logger->error("Error while initializing ip");
+    return false;
+  }
+
+  auto* server = new PingServer(logger, ip, port.value());
+
+  server->moveToThread(serverThread);
+
+  connect(server, &PingServer::hasPing, broadcastSender,
           &BroadcastUtil::BroadcastSender::stop, Qt::QueuedConnection);
-  connect(pingService, &PingService::pingTimeout, broadcastSender,
+  connect(server, &PingServer::pingTimeout, broadcastSender,
           &BroadcastUtil::BroadcastSender::start, Qt::QueuedConnection);
 
-  std::thread grpcServerThread{[pingService, this]() {
-    grpc::ServerBuilder builder;
+  connect(serverThread, &QThread::started, server, &PingServer::start);
 
-    assert(!ip.isNull());
-    assert(port);
+  connect(serverThread, &QThread::finished, serverThread, &QThread::deleteLater);
+  connect(serverThread, &QThread::finished, server, &QObject::deleteLater);
 
-    builder.AddListeningPort(
-        ip.toString().toStdString() + ":" + std::to_string(port.value()),
-        grpc::InsecureServerCredentials());
-    builder.RegisterService(pingService);
-
-    auto server{builder.BuildAndStart()};
-    server->Wait();
-  }};
-  grpcServerThread.detach();
+  broadcastSender->setPort(port.value());
+  broadcastSender->setIp(ip);
 
   broadcastSender->start();
+  serverThread->start();
 
   return true;
 }

@@ -21,6 +21,7 @@ FetchContent_MakeAvailable(spdlog)
 
 add_subdirectory(./common/broadcastUtil)
 add_subdirectory(./common/api)
+add_subdirectory(./common/networkUtil)
 
 add_subdirectory(./client)
 add_subdirectory(./server)
